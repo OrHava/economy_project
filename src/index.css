@@ -1,0 +1,54 @@
+/* Styling for the Actuarial Calculator App */
+.actuarial-app {
+  max-width: 800px;
+  margin: auto;
+  padding: 2rem;
+  font-family: "Arial", sans-serif;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #2c3e50;
+  color: white;
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+header h1 {
+  margin: 0;
+}
+
+nav button {
+  background-color: #3498db;
+  color: white;
+  border: none;
+  padding: 0.8rem;
+  margin-left: 1rem;
+  border-radius: 5px;
+}
+
+nav button:hover {
+  background-color: #2980b9;
+}
+
+.calculator-section {
+  margin-top: 2rem;
+}
+
+.input-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.input-group label {
+  font-weight: bold;
+}
+
+.input-group input {
+  padding: .6rem;
+}
+
