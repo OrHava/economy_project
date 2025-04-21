@@ -147,13 +147,16 @@ const [calculationSteps, setCalculationSteps] = useState([]);
     return probability;
   };
   const calculateEmployeeLiability = (employee, index) => {
-    const yearsUntilRetirement = 30;
+  
     const salaryGrowth = index % 2 === 1 ? 0.02 : 0.04;
     const salaryGrowthFrequency = 2;
     const nextSalaryRaiseDate = new Date("2025-06-30");
   
     const startDate = new Date(employee["תאריך תחילת עבודה"]);
     const birthDate = new Date(employee["תאריך לידה"]);
+
+
+
     const clause14Percentage = parseFloat(employee["אחוז סעיף 14"] || 0); // New
     const currentDate = new Date();
     const leaveDate = employee["תאריך עזיבה"] ? new Date(employee["תאריך עזיבה"]) : null;
@@ -161,11 +164,18 @@ const [calculationSteps, setCalculationSteps] = useState([]);
     const currentAge = currentDate.getFullYear() - birthDate.getFullYear();
     const yearsOfService = (currentDate - startDate) / (1000 * 3600 * 24 * 365);
     const employeeID = parseInt(employee["EmployeeID"]);
+
+    const gender = employee["מין"]?.trim();  // assuming 'זכר' for male, 'נקבה' for female (if it's in Hebrew)
+    const retirementAge = gender === "נקבה" ? 64 : 67;
+
+    const yearsUntilRetirement = Math.max(0, retirementAge - currentAge);  // can't be negative
+
+
   
     if (!salary || isNaN(currentAge)) return "Invalid data";
   
     // Clause 14 fully applied — employer owes nothing
-    if (clause14Percentage === 100) return (0).toFixed(2);
+    // if (clause14Percentage === 100) return (0).toFixed(2);
   
     let liability = 0;
   
@@ -192,7 +202,9 @@ const [calculationSteps, setCalculationSteps] = useState([]);
       const resignationRate = paysSeveranceOnResign ? resignation : 0;
       const combinedRate = mortality + resignationRate;
   
-      const benefit = projectedSalary * yearsUntilRetirement;
+       const benefit = projectedSalary * yearsUntilRetirement * 12;
+    
+
   
       // 💡 Adjust liability by remaining Clause 14 % (e.g., if only 72% is covered, employer still owes 28%)
       const clause14Adjustment = 1 - (clause14Percentage / 100);
@@ -203,6 +215,12 @@ const [calculationSteps, setCalculationSteps] = useState([]);
         const assetPayment = parseFloat(employee["תשלום מהנכס"]);
         presentValue += assetPayment / discount;
       }
+
+      if (employee["שווי נכס"]) {
+        const assetProperty = parseFloat(employee["שווי נכס"]);
+        presentValue += assetProperty / discount;
+      }
+  
   
       if (employee["השלמה בצ'ק"]) {
         const checkCompletion = parseFloat(employee["השלמה בצ'ק"]);
@@ -316,7 +334,7 @@ const [calculationSteps, setCalculationSteps] = useState([]);
         <td>{employee["שכר"]}</td>
         <td>{employee["מין"]}</td>
         <td>{formatExcelSerialDate(employee["תאריך תחילת עבודה"])}</td>
-        <td>{formatExcelSerialDate(employee["תאריך קבלת סעיף 14"])}</td>
+        <td>{formatExcelSerialDate(employee["תאריך  קבלת סעיף 14"])}</td>
         <td>{employee["אחוז סעיף 14"]}</td>
         <td>{employee["שווי נכס"]}</td>
         <td>{employee["הפקדות"]}</td>
