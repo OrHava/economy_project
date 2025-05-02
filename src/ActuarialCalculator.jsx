@@ -68,62 +68,130 @@ const [calculationSteps, setCalculationSteps] = useState([]);
       console.error("Error loading mortality data:", error);
     }
   };
+  const discountRate = 0.04;
 
+function getDiscountFactor(years) {
+  return Math.pow(1 + discountRate, years);
+}
 
-  const getCalculationBreakdown = (employee, index) => {
-    const steps = [];
-    const yearsUntilRetirement = 30;
+function clause14Adjustment(t, yearsBeforeClause14, clause14Percentage) {
+  if (t < yearsBeforeClause14) return 1;
+  return (100 - clause14Percentage) / 100;
+}
+
+  const calculateEmployeeLiability = (employee, index) => {
     const salaryGrowth = index % 2 === 1 ? 0.02 : 0.04;
     const salaryGrowthFrequency = 2;
     const nextSalaryRaiseDate = new Date("2025-06-30");
   
-    const startDate = new Date(employee["תאריך תחילת עבודה"]);
-    const birthDate = new Date(employee["תאריך לידה"]);
-    const currentDate = new Date();
-    const salary = parseFloat(employee["שכר"]);
-    const currentAge = currentDate.getFullYear() - birthDate.getFullYear();
-    const employeeID = parseInt(employee["EmployeeID"]);
+    const startDate = parseDate2(employee["תאריך תחילת עבודה"]);
+    const Date14 = parseDate2(employee["תאריך  קבלת סעיף 14"]);
+    const clause14Percentage = parseFloat(employee["אחוז סעיף 14"] || 0);
+    const currentDate = new Date('2024-12-31');
+  
+    const leaveDate = parseDate(employee["תאריך עזיבה"]);
+    const salary = parseFloat(employee["שכר"].toString().replace(/,/g, ""));
+    const currentAge = calculateAge(employee["תאריך לידה"]);
+    const employeeID = 13;
+    const gender = employee["מין"]?.trim();
+    const retirementAge = gender === "נקבה" ? 64 : 67;
+    const yearsUntilRetirement = Math.max(0, retirementAge - currentAge);
+  
+    let yearsBeforeClause14 = 0;
+    if (startDate instanceof Date && !isNaN(startDate.getTime()) &&
+        Date14 instanceof Date && !isNaN(Date14.getTime())) {
+      yearsBeforeClause14 = Date14.getFullYear() - startDate.getFullYear();
+      const startMonthDay = (startDate.getMonth() + 1) * 100 + startDate.getDate();
+      const date14MonthDay = (Date14.getMonth() + 1) * 100 + Date14.getDate();
+      if (date14MonthDay < startMonthDay) {
+        yearsBeforeClause14 -= 1;
+      }
+      yearsBeforeClause14 = Math.max(0, yearsBeforeClause14);
+    } else {
+      yearsBeforeClause14 = 0;
+    }
+  
+    if (!salary || isNaN(currentAge)) return "Invalid data";
   
     let liability = 0;
   
     for (let t = 0; t < yearsUntilRetirement; t++) {
-      let raiseYears = currentDate < nextSalaryRaiseDate
-        ? Math.floor((t - 1) / salaryGrowthFrequency)
-        : Math.floor(t / salaryGrowthFrequency);
+      if (leaveDate && currentDate > leaveDate) {
+        if (employeeID === index) console.log("DEBUG -> Left Company Before Calculation, Year:", t);
+        return (0).toFixed(2);
+      }
   
-      const projectedSalary = salary * Math.pow(1 + salaryGrowth, raiseYears);
+      let raiseYears = 0;
+      if (currentDate < nextSalaryRaiseDate) {
+        raiseYears = Math.floor((t - 1) / salaryGrowthFrequency);
+      } else {
+        raiseYears = Math.floor(t / salaryGrowthFrequency);
+      }
+  
+      const projSalary = salary * Math.pow(1 + salaryGrowth, raiseYears);
       const futureAge = currentAge + t;
+  
+      // Survival probability for year t+1
       const survivalProb = calculateSurvivalProbability(currentAge, t + 1);
+  
+      // Mortality and resignation rates for futureAge + 1 (as per your table)
       const mortality = getMortalityRate(futureAge + 1);
       const resignation = getResignationRate(futureAge);
-      const discount = Math.pow(1 + (discountRateCurve[t] || 0.05), t);
+      const combinedRate = mortality + resignation;
   
-      const paysSeveranceOnResign = isEven(employeeID);
-      const resignationRate = paysSeveranceOnResign ? resignation : 0;
+      // Discount factor for year t+1
+      const discount = getDiscountFactor(t + 1);
   
-      const combinedRate = mortality + resignationRate;
-      const benefit = projectedSalary * yearsUntilRetirement * (1 - 0.05);
-      const presentValue = (benefit * survivalProb * combinedRate) / discount;
+      // Years of service at time t (capped at yearsUntilRetirement)
+      const yearsOfService = Math.min(t + (currentDate.getFullYear() - startDate.getFullYear()), yearsUntilRetirement);
   
-      steps.push({
-        year: t + 1,
-        projectedSalary: projectedSalary.toFixed(2),
-        survivalProb: survivalProb.toFixed(5),
-        mortality,
-        resignation: resignationRate,
-        discount: discount.toFixed(5),
-        benefit: benefit.toFixed(2),
-        presentValue: presentValue.toFixed(2),
-      });
+      // Severance benefit: 1 month salary per year of service
+      const benefit = projSalary * (yearsOfService / 12);
+  
+      // Clause 14 adjustment
+      const clauseAdj = clause14Adjustment(t, yearsBeforeClause14, clause14Percentage);
+  
+      // Present value calculation
+      const presentValue = (benefit * survivalProb * combinedRate * clauseAdj) / discount;
+  
+      if (employeeID === index) {
+        console.log(`DEBUG -> Year: ${t}`, {
+          raiseYears,
+          projSalary,
+          futureAge,
+          survivalProb,
+          mortality,
+          resignation,
+          combinedRate,
+          benefit,
+          clauseAdj,
+          discount,
+          presentValue
+        });
+      }
   
       liability += presentValue;
     }
   
-    return steps;
+    // Add asset payments if any
+    ["תשלום מהנכס", "שווי נכס", "הפקדות", "השלמה בצ'ק"].forEach(key => {
+      if (employee[key]) {
+        const val = parseFloat(employee[key]);
+        liability += val;
+        if (employeeID === index) console.log(`DEBUG -> Added ${key}:`, val);
+      }
+    });
+  
+    if (employeeID === index) console.log("DEBUG -> Final Liability:", liability.toFixed(2));
+  
+    return liability.toFixed(2);
   };
   
 
+
+  
   const getMortalityRate = (age) => {
+  
     const data = mortalityTable.find((item) => item.age === age);
     return data ? data.qx : 0;
   };
@@ -146,114 +214,110 @@ const [calculationSteps, setCalculationSteps] = useState([]);
     }
     return probability;
   };
-  const calculateEmployeeLiability = (employee, index) => {
-  
-    const salaryGrowth = index % 2 === 1 ? 0.02 : 0.04;
-    const salaryGrowthFrequency = 2;
-    const nextSalaryRaiseDate = new Date("2025-06-30");
-  
-    const startDate = new Date(employee["תאריך תחילת עבודה"]);
-    const birthDate = new Date(employee["תאריך לידה"]);
 
 
 
-    const clause14Percentage = parseFloat(employee["אחוז סעיף 14"] || 0); // New
-    const currentDate = new Date();
-    const leaveDate = employee["תאריך עזיבה"] ? new Date(employee["תאריך עזיבה"]) : null;
-    const salary = parseFloat(employee["שכר"].toString().replace(/,/g, ""));
-    const currentAge = currentDate.getFullYear() - birthDate.getFullYear();
-    const yearsOfService = (currentDate - startDate) / (1000 * 3600 * 24 * 365);
-    const employeeID = parseInt(employee["EmployeeID"]);
-
-    const gender = employee["מין"]?.trim();  // assuming 'זכר' for male, 'נקבה' for female (if it's in Hebrew)
-    const retirementAge = gender === "נקבה" ? 64 : 67;
-
-    const yearsUntilRetirement = Math.max(0, retirementAge - currentAge);  // can't be negative
-
-
-  
-    if (!salary || isNaN(currentAge)) return "Invalid data";
-  
-    // Clause 14 fully applied — employer owes nothing
-    // if (clause14Percentage === 100) return (0).toFixed(2);
-  
-    let liability = 0;
-  
-    for (let t = 0; t < yearsUntilRetirement; t++) {
-      if (leaveDate && currentDate > leaveDate) {
-        break;
+const parseDate = (dateInput) => {
+  if (!dateInput) return null;
+  if (!isNaN(dateInput)) {
+      // If it's a number, treat as Excel serial
+      return formatExcelSerialDate(dateInput);
+  } else if (typeof dateInput === 'string') {
+      // If it's a string like "9.1.2014"
+      const parts = dateInput.split('.');
+      if (parts.length === 3) {
+          const [day, month, year] = parts.map(Number);
+          return new Date(year, month - 1, day); // JS months are 0-based
       }
-  
-      let raiseYears = 0;
-      if (currentDate < nextSalaryRaiseDate) {
-        raiseYears = Math.floor((t - 1) / salaryGrowthFrequency);
-      } else {
-        raiseYears = Math.floor(t / salaryGrowthFrequency);
-      }
-  
-      const projectedSalary = salary * Math.pow(1 + salaryGrowth, raiseYears);
-      const futureAge = currentAge + t;
-      const survivalProb = calculateSurvivalProbability(currentAge, t + 1);
-      const mortality = getMortalityRate(futureAge + 1);
-      const resignation = getResignationRate(futureAge);
-      const discount = Math.pow(1 + (discountRateCurve[t] || 0.05), t);
-  
-      const paysSeveranceOnResign = isEven(employeeID);
-      const resignationRate = paysSeveranceOnResign ? resignation : 0;
-      const combinedRate = mortality + resignationRate;
-  
-       const benefit = projectedSalary * yearsUntilRetirement * 12;
-    
+  }
+  return null;
+};
 
-  
-      // 💡 Adjust liability by remaining Clause 14 % (e.g., if only 72% is covered, employer still owes 28%)
-      const clause14Adjustment = 1 - (clause14Percentage / 100);
-  
-      let presentValue = (benefit * survivalProb * combinedRate * clause14Adjustment) / discount;
-  
-      if (employee["תשלום מהנכס"]) {
-        const assetPayment = parseFloat(employee["תשלום מהנכס"]);
-        presentValue += assetPayment / discount;
-      }
 
-      if (employee["שווי נכס"]) {
-        const assetProperty = parseFloat(employee["שווי נכס"]);
-        presentValue += assetProperty / discount;
+function formatExcelSerialDate(serialDate) {
+  if (!serialDate || isNaN(serialDate)) return "";
+
+  // Excel serial date starts on Jan 1, 1900, but Excel wrongly considers 1900 a leap year, so we subtract 2 days
+  const excelEpoch = new Date(1900, 0, 1);
+  const date = new Date(excelEpoch.getTime() + (serialDate - 2) * 86400000);
+
+  return date.toLocaleDateString("he-IL"); // Or use another locale if needed
+}
+
+
+const parseDate2 = (dateInput) => {
+  if (!dateInput) {
+    return null;
+  }
+  if (typeof dateInput === "string") {
+    const parts = dateInput.split(".");
+    if (parts.length === 3) {
+      const [day, month, year] = parts.map(Number);
+      if (isNaN(day) || isNaN(month) || isNaN(year)) {
+        return null;
       }
-  
-  
-      if (employee["השלמה בצ'ק"]) {
-        const checkCompletion = parseFloat(employee["השלמה בצ'ק"]);
-        presentValue += checkCompletion / discount;
+      const date = new Date(year, month - 1, day);
+      if (isNaN(date.getTime())) {
+        return null;
       }
-  
-      liability += presentValue;
+      return date;
     }
   
-    return liability.toFixed(2);
-  };
-  
+    return null;
+  }
+  if (!isNaN(dateInput)) {
 
-  const exportEmployeeResultsToExcel = () => {
-    const results = employeeData.map((employee) => {
-      const liability = calculateEmployeeLiability(employee);
-      return {
-        EmployeeID: employee["EmployeeID"],
-        Name: employee["שם"],
-        LastName: employee["שם משפחה"],
-        Age: employee["גיל"],
-        Salary: employee["שכר"],
-        Liability: liability,
-      };
-    });
+    return formatExcelSerialDate2(dateInput);
+  }
 
+  return null;
+};
+
+function formatExcelSerialDate2(serialDate) {
+  if (!serialDate || isNaN(serialDate)) {
+
+    return null;
+  }
+  const excelEpoch = new Date(1900, 0, 1);
+  const date = new Date(excelEpoch.getTime() + (serialDate - 2) * 86400000);
+  if (isNaN(date.getTime())) {
+
+    return null;
+  }
+  return date; // Return Date object, not string
+}
+
+const exportEmployeeResultsToExcel = () => {
+  const results = employeeData.map((employee, index) => {
+    const employeeID = index + 1;
+    const liability = calculateEmployeeLiability(employee, employeeID);
     
+    return {
+      EmployeeID: employeeID,
+      Name: employee["שם"],
+      LastName: employee["שם משפחה"],
+      Age: calculateAge(employee["תאריך לידה"]),
+      Salary: employee["שכר"],
+      Gender: employee["מין"],
+      StartJob: formatExcelSerialDate(employee["תאריך תחילת עבודה"]),
+      DateOfGetting14: formatExcelSerialDate(employee["תאריך  קבלת סעיף 14"]),
+      PercentOf14: employee["אחוז סעיף 14"],
+      ValueOfProperty: employee["שווי נכס"],
+      Deposits: employee["הפקדות"],
+      DateOfLeave: formatExcelSerialDate(employee["תאריך עזיבה"]),
+      PayFromProperty: employee["תשלום מהנכס"],
+      Check: employee["השלמה בצ'ק"],
+      ReasonOfLeaving: employee["סיבת עזיבה"],
+      Liability: liability,
+    };
+  });
 
-    const worksheet = XLSX.utils.json_to_sheet(results);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Employee Liabilities");
-    XLSX.writeFile(workbook, "employee_liabilities.xlsx");
-  };
+  const worksheet = XLSX.utils.json_to_sheet(results);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Employee Results");
+  XLSX.writeFile(workbook, "employee_results.xlsx");
+};
+
 
   useEffect(() => {
     loadMortalityTable();
@@ -282,15 +346,6 @@ const [calculationSteps, setCalculationSteps] = useState([]);
   }
   
 
-  function formatExcelSerialDate(serialDate) {
-    if (!serialDate || isNaN(serialDate)) return "";
-  
-    // Excel serial date starts on Jan 1, 1900, but Excel wrongly considers 1900 a leap year, so we subtract 2 days
-    const excelEpoch = new Date(1900, 0, 1);
-    const date = new Date(excelEpoch.getTime() + (serialDate - 2) * 86400000);
-  
-    return date.toLocaleDateString("he-IL"); // Or use another locale if needed
-  }
   
   
 
@@ -321,13 +376,14 @@ const [calculationSteps, setCalculationSteps] = useState([]);
           </thead>
           <tbody>
   {employeeData.map((employee, index) => {
-    const liability = calculateEmployeeLiability(employee,index );
+     const employeeID = index + 1;
+     const liability = calculateEmployeeLiability(employee, employeeID);
     return (
-      <tr key={index} onClick={() => {
+      <tr key={employeeID} onClick={() => {
         setSelectedEmployee(employee);
         setCalculationSteps(getCalculationBreakdown(employee));
       }}>
-        <td>{index + 1}</td>
+        <td>{employeeID}</td>
         <td>{employee["שם"]}</td>
         <td>{employee["שם משפחה"]}</td>
         <td>{calculateAge(employee["תאריך לידה"])}</td>
